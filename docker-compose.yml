@@ -1,0 +1,31 @@
+name: agent-gateway
+
+services:
+  gateway:
+    build: .
+    image: agent-gateway:latest
+    env_file:
+      - .env
+    environment:
+      # 容器内固定 8020，只加入主应用创建的内网；不映射宿主机端口。
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: "8020"
+    volumes:
+      # config.json 以只读方式挂载，密钥经 .env 注入；data/ 为唯一持久化位置。
+      - ./data:/app/data
+      - ./config.json:/app/config.json:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - web
+
+networks:
+  # 主应用 docker-compose.yml 创建的网络（项目名 vibe-craft），服务名 gateway 即内网 DNS 名。
+  web:
+    external: true
+    name: vibe-craft_web

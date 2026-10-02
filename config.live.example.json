@@ -1,0 +1,48 @@
+{
+  "mode": "live",
+  "text_concurrency": 5,
+  "image_concurrency": 2,
+  "projects": {
+    "vibe-craft": {
+      "key_env": "PROJECT_VIBE_CRAFT_KEY",
+      "models": ["text.default", "text.vision", "image.default"],
+      "daily_limit": 200,
+      "max_output_tokens": 3500
+    }
+  },
+  "routes": {
+    "text.default": {"candidates": ["text-primary", "text-backup"]},
+    "text.vision": {"candidates": ["text-primary", "text-backup"]},
+    "image.default": {
+      "kind": "image", "candidates": ["image-primary"], "max_attempts": 2,
+      "attempt_timeout": 240, "deadline": 260
+    }
+  },
+  "deployments": {
+    "text-primary": {
+      "provider": "compatible", "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "key_env": "UPSTREAM_PRIMARY_KEY", "model": "REPLACE_WITH_REAL_TEXT_MODEL_ID",
+      "account": "ark-account-a", "quota_group": "ark-account-a-text",
+      "capabilities": ["text", "vision", "json"],
+      "billing_error_codes": [], "defaults": {"thinking": {"type": "disabled"}},
+      "currency": "CNY", "input_per_million": null, "output_per_million": null
+    },
+    "text-backup": {
+      "provider": "compatible", "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "key_env": "UPSTREAM_BACKUP_KEY", "model": "REPLACE_WITH_REAL_TEXT_MODEL_ID",
+      "account": "ark-account-b", "quota_group": "ark-account-b-text",
+      "capabilities": ["text", "vision", "json"],
+      "billing_error_codes": [], "defaults": {"thinking": {"type": "disabled"}},
+      "currency": "CNY", "input_per_million": null, "output_per_million": null
+    },
+    "image-primary": {
+      "provider": "compatible", "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "key_env": "UPSTREAM_IMAGE_KEY", "model": "REPLACE_WITH_REAL_IMAGE_MODEL_ID",
+      "account": "ark-account-a", "quota_group": "ark-account-a-image",
+      "capabilities": ["image", "image_to_image", "multiple_reference_images"],
+      "billing_error_codes": [],
+      "defaults": {"watermark": true, "sequential_image_generation": "disabled"},
+      "currency": "CNY", "image_price": null
+    }
+  }
+}

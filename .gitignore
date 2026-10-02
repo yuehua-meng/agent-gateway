@@ -1,0 +1,10 @@
+.env
+.venv/
+config.json
+data/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.log
+pytest-cache-files-*/
+backups/
