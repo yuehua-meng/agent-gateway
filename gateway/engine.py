@@ -140,7 +140,11 @@ class Engine:
                             raise GatewayError("UPSTREAM_RESPONSE_TOO_LARGE", "上游结果超过 32MB，请缩小输出。",
                                                502, accepted_unknown=kind == "image")
                         chunks.append(chunk)
-                    raw = httpx.Response(response.status_code, headers=response.headers, content=b"".join(chunks))
+                    # aiter_bytes() 已经解压过一轮，这里再带上 content-encoding / content-length
+                    # 重建 Response 会让 httpx 按头信息解压第二遍，遇到压缩响应就抛 DecodingError。
+                    headers = [(key, value) for key, value in response.headers.multi_items()
+                               if key.lower() not in {"content-encoding", "content-length"}]
+                    raw = httpx.Response(response.status_code, headers=headers, content=b"".join(chunks))
                     if not 200 <= raw.status_code < 300:
                         raise self.classify(raw, dep, kind)
                     try:

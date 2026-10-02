@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -71,6 +72,18 @@ def test_auth_separation_and_model_access(tmp_path):
         assert post(client, {**BODY, "model": "actual-a"}).status_code == 403
         assert client.get("/").status_code == 200
         assert client.get("/static/app.js").status_code == 200
+
+
+def test_gzip_encoded_upstream_response_is_not_decoded_twice(tmp_path):
+    def handler(req):
+        body = json.dumps({"id": "provider-request", "choices": [
+            {"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}).encode()
+        return httpx.Response(200, headers={"content-encoding": "gzip"}, content=gzip.compress(body))
+    with client_for(tmp_path, handler) as client:
+        response = post(client)
+        assert response.status_code == 200
+        assert response.json()["choices"][0]["message"]["content"] == "hello"
 
 
 def test_billing_fallback_persists_and_does_not_leak(tmp_path):
