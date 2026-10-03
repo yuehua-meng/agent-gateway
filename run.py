@@ -11,4 +11,5 @@ if __name__ == "__main__":
     port = int(os.getenv("GATEWAY_PORT", "8020"))
     print(f"Agent gateway: http://{host}:{port} | mode={settings.mode} | single worker")
     uvicorn.run(app, host=host, port=port, workers=1, access_log=False,
-                timeout_graceful_shutdown=300, limit_concurrency=80)
+                timeout_graceful_shutdown=300,
+                limit_concurrency=max(256, settings.text_concurrency + settings.image_concurrency + settings.image_queue_limit + 64))

@@ -66,10 +66,12 @@ class Route(StrictModel):
 
 class Settings(StrictModel):
     mode: Literal["demo", "live"] = "demo"
-    text_concurrency: int = Field(default=5, ge=1, le=50)
-    image_concurrency: int = Field(default=2, ge=1, le=10)
-    text_queue_timeout: float = Field(default=2, gt=0, le=30)
-    image_queue_timeout: float = Field(default=5, gt=0, le=30)
+    text_concurrency: int = Field(default=200, ge=1, le=1000)
+    image_concurrency: int = Field(default=10, ge=1, le=100)
+    # Accepted for old config files only; text requests no longer queue.
+    text_queue_timeout: float = Field(default=0, ge=0, le=30)
+    image_queue_limit: int = Field(default=6, ge=0, le=100)
+    image_queue_timeout: float = Field(default=60, gt=0, le=480)
     retry_base_seconds: float = Field(default=1, ge=0, le=10)
     cooldown_seconds: float = Field(default=60, gt=0)
     projects: dict[str, Project]

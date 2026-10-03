@@ -9,6 +9,8 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
+from .admission import Admission
+
 
 class GatewayError(Exception):
     def __init__(self, code, message, status=503, retryable=False, accepted_unknown=False, delay=0):
@@ -37,8 +39,7 @@ def retry_after(value):
 class Engine:
     def __init__(self, settings, secrets, store, client):
         self.settings, self.secrets, self.store, self.client = settings, secrets, store, client
-        self.semaphores = {"chat": asyncio.Semaphore(settings.text_concurrency),
-                           "image": asyncio.Semaphore(settings.image_concurrency)}
+        self.admission = Admission(settings.text_concurrency, settings.image_concurrency, settings.image_queue_limit)
         self.probes = set()
         self.tasks = set()
 
@@ -196,8 +197,19 @@ class Engine:
         usage = result.get("usage") if isinstance(result, dict) else None
         if not isinstance(usage, dict):
             return {}
-        return {k: v for k, v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
-                and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+        def valid(value):
+            return type(value) is int and 0 <= value <= 2**63 - 1
+
+        clean = {k: v for k, v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
+                 and valid(v)}
+        for parent, field, child in (("prompt_tokens", "prompt_tokens_details", "cached_tokens"),
+                                     ("completion_tokens", "completion_tokens_details", "reasoning_tokens")):
+            details = usage.get(field)
+            value = details.get(child) if isinstance(details, dict) else None
+            # Missing/invalid values stay unknown. Subsets must never exceed their parent total.
+            if valid(value) and (parent not in clean or value <= clean[parent]):
+                clean[field] = {child: value}
+        return clean
 
     def cost(self, result, dep, kind):
         if dep.provider == "demo":
@@ -209,20 +221,19 @@ class Engine:
             return None, "unknown"
         return (usage["prompt_tokens"] * dep.input_per_million + usage["completion_tokens"] * dep.output_per_million) / 1_000_000, "estimated"
 
-    async def execute(self, op, project_id, body, required, requested_timeout=None):
+    async def execute(self, op, project_id, body, required, requested_timeout=None, ticket=None):
         route = self.settings.routes[body["model"]]
         kind, project = route.kind, self.settings.projects[project_id]
         total = min(route.deadline, requested_timeout) if requested_timeout else route.deadline
         end = asyncio.get_running_loop().time() + total
-        sem = self.semaphores[kind]
-        acquired, attempt, started, last_dep = False, None, None, None
+        attempt, started, last_dep = None, None, None
         try:
-            wait = self.settings.text_queue_timeout if kind == "chat" else self.settings.image_queue_timeout
             try:
-                await asyncio.wait_for(sem.acquire(), timeout=min(wait, total))
-                acquired = True
+                if not ticket.active:
+                    await asyncio.wait_for(asyncio.shield(ticket.ready), timeout=min(self.settings.image_queue_timeout, total))
             except TimeoutError:
-                raise GatewayError("GATEWAY_BUSY", "当前请求较多，请稍后重试。", 429) from None
+                raise GatewayError("GATEWAY_BUSY", "图片排队超时，未调用上游，可稍后使用同一幂等键重试。",
+                                   429, retryable=True) from None
             candidates = [x for x in route.candidates if required <= set(self.settings.deployments[x].capabilities)]
             if not candidates:
                 raise GatewayError("MODEL_CAPABILITY_MISMATCH", "该模型池不支持请求所需能力。", 400)
@@ -288,13 +299,16 @@ class Engine:
                 self.store.finish_attempt(attempt, time.monotonic() - started, "RESULT_UNKNOWN", last_dep.currency)
             self.store.finish(op, "unknown", error=GatewayError("INTERNAL_ERROR", "网关异常，请联系管理员核对操作。", 503).payload(), status=503)
         finally:
-            if acquired:
-                sem.release()
+            self.admission.release(ticket)
 
-    def launch(self, *args):
-        task = asyncio.create_task(self.execute(*args))
+    def launch(self, *args, ticket):
+        task = asyncio.create_task(self.execute(*args, ticket=ticket))
         self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        def done(finished):
+            self.tasks.discard(finished)
+            # Also covers cancellation before the coroutine executes its first line.
+            self.admission.release(ticket)
+        task.add_done_callback(done)
         return task
 
     async def close(self):

@@ -8,13 +8,16 @@ TZ = timezone(timedelta(hours=8))
 OP_FIELDS = ("id,project,alias,kind,task_id,state,created,updated,http_status,served_model,fallback,"
              "json_extract(error,'$.code') AS error_code")
 ATT_FIELDS = ("a.id,a.operation_id,a.project,a.deployment,a.actual_model,a.started,a.elapsed_ms,"
-              "a.code,a.prompt_tokens,a.completion_tokens,a.estimated_cost,a.currency,a.cost_status")
+              "a.code,a.prompt_tokens,a.completion_tokens,a.cached_tokens,a.reasoning_tokens,"
+              "a.estimated_cost,a.currency,a.cost_status")
 
 
 def usage():
     return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "known_token_calls": 0,
             "unknown_usage_calls": 0, "image_calls": 0, "pending_calls": 0,
-            "unpriced_calls": 0, "not_accepted_calls": 0, "costs": {}}
+            "unpriced_calls": 0, "not_accepted_calls": 0, "costs": {},
+            "cached_tokens": 0, "reasoning_tokens": 0, "cached_known_calls": 0, "reasoning_known_calls": 0,
+            "cached_unknown_calls": 0, "reasoning_unknown_calls": 0}
 
 
 def add_usage(total, attempt, kind):
@@ -31,6 +34,13 @@ def add_usage(total, attempt, kind):
             total["unknown_usage_calls"] += 1
         else:
             total["known_token_calls"] += 1
+        for key in ("cached", "reasoning"):
+            value = attempt.get(key + "_tokens")
+            if value is None:
+                total[key + "_unknown_calls"] += 1
+            else:
+                total[key + "_known_calls"] += 1
+                total[key + "_tokens"] += value
     cost = attempt["estimated_cost"]
     if attempt["cost_status"] == "not_accepted":
         total["not_accepted_calls"] += 1

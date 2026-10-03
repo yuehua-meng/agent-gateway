@@ -11,6 +11,7 @@ import httpx
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from .admission import CapacityFull
 from .config import ROOT, load_secrets, load_settings
 from .engine import Engine, GatewayError
 from .observe import Observer
@@ -153,7 +154,7 @@ def create_app(settings=None, secrets=None, data_dir=None, transport=None):
             store.recover()
             async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False,
                     limits=httpx.Limits(max_connections=settings.text_concurrency+settings.image_concurrency,
-                                       max_keepalive_connections=10)) as client:
+                                       max_keepalive_connections=settings.text_concurrency+settings.image_concurrency)) as client:
                 engine = Engine(settings, secrets, store, client)
                 app.state.store, app.state.engine = store, engine
 
@@ -265,14 +266,26 @@ def create_app(settings=None, secrets=None, data_dir=None, transport=None):
         if len(idem) > 200 or len(task_id) > 200:
             raise GatewayError("INVALID_REQUEST", "操作标识或任务标识过长。", 400)
         engine, store = app.state.engine, app.state.store
-        if len(engine.tasks) >= settings.text_concurrency + settings.image_concurrency + 20:
-            raise GatewayError("GATEWAY_BUSY", "等待请求过多，请稍后重试。", 429)
-        op, fresh, matches = store.claim(project_id, idem, alias, kind, body, task_id)
+        ticket = None
+        def admit():
+            nonlocal ticket
+            try:
+                ticket = engine.admission.reserve(kind)
+            except CapacityFull:
+                raise GatewayError("GATEWAY_BUSY", "当前执行名额或图片等待队列已满，请稍后重试。",
+                                   429, retryable=True) from None
+        try:
+            # Existing operations bypass admission. Claim and reservation contain no await.
+            op, fresh, matches = store.claim(project_id, idem, alias, kind, body, task_id, admit=admit)
+        except BaseException:
+            if ticket:
+                engine.admission.release(ticket)
+            raise
         if not matches:
             raise GatewayError("IDEMPOTENCY_CONFLICT", "相同幂等键不能提交不同内容。", 409)
         if fresh:
             # Shield accepted work from an HTTP client disconnect; bounded by its original deadline.
-            await asyncio.shield(engine.launch(op["id"], project_id, body, required, timeout))
+            await asyncio.shield(engine.launch(op["id"], project_id, body, required, timeout, ticket=ticket))
             op = store.operation(op["id"], project_id)
         return respond(op)
 
@@ -305,6 +318,7 @@ def create_app(settings=None, secrets=None, data_dir=None, transport=None):
     async def status(request: Request):
         admin_auth(request)
         return {"mode": settings.mode, "active_requests": len(app.state.engine.tasks),
+                "capacity": app.state.engine.admission.snapshot(),
                 "projects": {n: {"models": p.models, "daily_limit": p.daily_limit} for n, p in settings.projects.items()},
                 "deployments": {n: {"model": d.model, "account": d.account, "quota_group": d.quota_group,
                                       "scopes": app.state.engine.scopes(n)} for n, d in settings.deployments.items()},

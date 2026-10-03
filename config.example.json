@@ -1,36 +1,78 @@
 {
   "mode": "demo",
-  "text_concurrency": 5,
-  "image_concurrency": 2,
+  "text_concurrency": 200,
+  "image_concurrency": 10,
   "projects": {
     "demo-project": {
       "key_env": "PROJECT_DEMO_KEY",
-      "models": ["text.default", "text.vision", "image.default"],
+      "models": [
+        "text.default",
+        "text.vision",
+        "image.default"
+      ],
       "daily_limit": 200,
       "max_output_tokens": 3500
     }
   },
   "routes": {
-    "text.default": {"candidates": ["demo-primary", "demo-backup"]},
-    "text.vision": {"candidates": ["demo-primary", "demo-backup"]},
+    "text.default": {
+      "candidates": [
+        "demo-primary",
+        "demo-backup"
+      ]
+    },
+    "text.vision": {
+      "candidates": [
+        "demo-primary",
+        "demo-backup"
+      ]
+    },
     "image.default": {
-      "kind": "image", "candidates": ["demo-image"], "max_attempts": 2,
-      "attempt_timeout": 240, "deadline": 260
+      "kind": "image",
+      "candidates": [
+        "demo-image"
+      ],
+      "max_attempts": 2,
+      "attempt_timeout": 240,
+      "deadline": 260
     }
   },
   "deployments": {
     "demo-primary": {
-      "provider": "demo", "model": "demo-text-primary", "account": "demo-account-a",
-      "quota_group": "demo-quota-a", "capabilities": ["text", "vision", "json"],
+      "provider": "demo",
+      "model": "demo-text-primary",
+      "account": "demo-account-a",
+      "quota_group": "demo-quota-a",
+      "capabilities": [
+        "text",
+        "vision",
+        "json"
+      ],
       "demo_failure": "billing"
     },
     "demo-backup": {
-      "provider": "demo", "model": "demo-text-backup", "account": "demo-account-b",
-      "quota_group": "demo-quota-b", "capabilities": ["text", "vision", "json"]
+      "provider": "demo",
+      "model": "demo-text-backup",
+      "account": "demo-account-b",
+      "quota_group": "demo-quota-b",
+      "capabilities": [
+        "text",
+        "vision",
+        "json"
+      ]
     },
     "demo-image": {
-      "provider": "demo", "model": "demo-image-fixture", "account": "demo-account-image",
-      "quota_group": "demo-quota-image", "capabilities": ["image", "image_to_image", "multiple_reference_images"]
+      "provider": "demo",
+      "model": "demo-image-fixture",
+      "account": "demo-account-image",
+      "quota_group": "demo-quota-image",
+      "capabilities": [
+        "image",
+        "image_to_image",
+        "multiple_reference_images"
+      ]
     }
-  }
+  },
+  "image_queue_limit": 6,
+  "image_queue_timeout": 60
 }

@@ -40,8 +40,10 @@ class Store:
         CREATE INDEX IF NOT EXISTS operations_created ON operations(created);
         CREATE INDEX IF NOT EXISTS attempts_operation ON attempts(operation_id, started);
         """)
-        if "actual_model" not in {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}:
-            self.db.execute("ALTER TABLE attempts ADD COLUMN actual_model TEXT")
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(attempts)")}
+        for name, kind in (("actual_model", "TEXT"), ("cached_tokens", "INTEGER"), ("reasoning_tokens", "INTEGER")):
+            if name not in columns:
+                self.db.execute(f"ALTER TABLE attempts ADD COLUMN {name} {kind}")
 
     @contextmanager
     def transaction(self):
@@ -73,14 +75,25 @@ class Store:
             db.execute("DELETE FROM daily WHERE day < ?", (
                 (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=366)).date().isoformat(),))
 
-    def claim(self, project, idem, alias, kind, body, task_id):
+    def claim(self, project, idem, alias, kind, body, task_id, admit=None):
         fingerprint = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
                                                  ensure_ascii=False).encode()).hexdigest()
         now = time.time()
         with self.transaction() as db:
             row = db.execute("SELECT * FROM operations WHERE project=? AND idem=?", (project, idem)).fetchone()
             if row:
+                matches = row["fingerprint"] == fingerprint
+                # Queue timeouts have not reached upstream and may be retried with the same key.
+                if (admit and matches and row["state"] == "failed" and row["error"]
+                        and json.loads(row["error"]).get("code") == "GATEWAY_BUSY"
+                        and not db.execute("SELECT 1 FROM attempts WHERE operation_id=?", (row["id"],)).fetchone()):
+                    admit()
+                    db.execute("UPDATE operations SET state='running',created=?,updated=?,error=NULL,http_status=NULL "
+                               "WHERE id=?", (now, now, row["id"]))
+                    return dict(db.execute("SELECT * FROM operations WHERE id=?", (row["id"],)).fetchone()), True, True
                 return dict(row), False, row["fingerprint"] == fingerprint
+            if admit:
+                admit()
             op = "op_" + uuid.uuid4().hex
             db.execute("INSERT INTO operations(id,project,idem,fingerprint,alias,kind,task_id,state,created,updated) "
                        "VALUES(?,?,?,?,?,?,?,'running',?,?)", (op, project, idem, fingerprint, alias, kind, task_id, now, now))
@@ -112,8 +125,10 @@ class Store:
         usage = usage or {}
         with self.transaction() as db:
             db.execute("UPDATE attempts SET elapsed_ms=?,code=?,prompt_tokens=?,completion_tokens=?,estimated_cost=?,"
-                       "currency=?,cost_status=? WHERE id=?", (int(elapsed*1000), code, usage.get("prompt_tokens"),
-                       usage.get("completion_tokens"), cost, currency, cost_status, attempt))
+                       "currency=?,cost_status=?,cached_tokens=?,reasoning_tokens=? WHERE id=?",
+                       (int(elapsed*1000), code, usage.get("prompt_tokens"), usage.get("completion_tokens"),
+                        cost, currency, cost_status, (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                        (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"), attempt))
 
     def blocks(self):
         with self.lock:
