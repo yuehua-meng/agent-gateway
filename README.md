@@ -1,7 +1,7 @@
-# 小团队 Agent 网关
+# Agent 网关
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-适用于约 9 人团队的独立模型入口：集中维护 Key，为每个项目分配访问凭据，统一主备切换、超时重试和调用限额。
+小团队自用的独立模型入口：集中维护 Key，为每个项目分配访问凭据，统一主备切换、超时重试和调用限额。
 
 **本目录独立运行，未接入或修改旁边的图文生成项目。默认是免费演示模式，不读取原项目 `.env`，不调用真实模型。**
 
@@ -25,7 +25,7 @@
 
 ## 1. 启动使用
 
-Windows 双击 **`start.cmd`**，然后打开 <http://127.0.0.1:8020>。
+Windows 双击 **`start.cmd`**，然后打开 [http://127.0.0.1:8020](http://127.0.0.1:8020)。
 
 首次启动会创建本目录的虚拟环境、安装依赖，并生成：
 
@@ -100,15 +100,15 @@ python -m venv .venv
 
 所有业务接口都要求 `Authorization: Bearer <项目凭据>`。推荐同时传入 `X-Task-Id` 和 `Idempotency-Key`，方便核对和避免重复提交。
 
-| 接口 | 说明 |
-|---|---|
-| `GET /health` | 存活、数据库可读和 demo/live 模式；无需 Key |
-| `GET /v1/models` | 当前项目可用的逻辑模型名 |
-| `POST /v1/chat/completions` | 文本、图片理解、JSON 对象输出 |
-| `POST /v1/images/generations` | 独立图片接口；必须提供幂等键 |
-| `GET /operations/{id}` | 查询原操作；只能访问自己的项目 |
-| `GET /admin/status` | 管理状态；使用独立管理员 Key |
-| `POST /admin/reset-block` | 管理员核对账户后解除停用 |
+| 接口                          | 说明                                        |
+| ------------------------------- | --------------------------------------------- |
+| `GET /health`                 | 存活、数据库可读和 demo/live 模式；无需 Key |
+| `GET /v1/models`              | 当前项目可用的逻辑模型名                    |
+| `POST /v1/chat/completions`   | 文本、图片理解、JSON 对象输出               |
+| `POST /v1/images/generations` | 独立图片接口；必须提供幂等键                |
+| `GET /operations/{id}`        | 查询原操作；只能访问自己的项目              |
+| `GET /admin/status`           | 管理状态；使用独立管理员 Key                |
+| `POST /admin/reset-block`     | 管理员核对账户后解除停用                    |
 
 独立 Python 示例，不会自动接入任何现有项目：
 
@@ -175,7 +175,7 @@ print(response.status_code, response.json())
 
 ## 8. 运维与备份
 
-- 默认并发：文本 5、生图 2；按上游配额调整配置。文本排队最多 2 秒、生图最多 5 秒，满了返回 `GATEWAY_BUSY`。
+- 默认全局并发：文本 **200**、图片 **10**；无每项目并发限制。文本满载立即返回 `429 / GATEWAY_BUSY`；图片最多额外排队 **6** 个、等待 **60 秒**，且计入请求总时限。详见 [请求处理说明](请求处理说明.md)。
 - 每天自动在线备份 SQLite 到 `data/backups/`，保留最近 7 份。另把备份复制到独立磁盘；同盘备份不能应对磁盘损坏。
 - 手动备份：`python manage.py backup backups/gateway-manual.db`，目标必须是新文件。
 - 恢复：先停止网关，保存当前 `data` 目录，再将备份放入一个新的数据目录并命名为 `gateway.db`；使用恢复后的目录替换原 `data`。不要把新数据库与旧 WAL/SHM 文件混在一起。
