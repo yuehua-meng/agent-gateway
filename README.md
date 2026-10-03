@@ -1,4 +1,5 @@
 # 小团队 Agent 网关
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 适用于约 9 人团队的独立模型入口：集中维护 Key，为每个项目分配访问凭据，统一主备切换、超时重试和调用限额。
 
@@ -208,3 +209,7 @@ agent-gateway/
 ```
 
 技术实现参考：[HTTPX 超时配置](https://www.python-httpx.org/advanced/timeouts/)、[FastAPI 生命周期](https://fastapi.tiangolo.com/advanced/events/)。
+
+## 开源协议
+
+本项目采用 [MIT License](LICENSE) 开源，可自由使用、修改和分发，只需保留版权与许可声明。
