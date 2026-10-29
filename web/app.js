@@ -138,11 +138,20 @@ async function initialize() {
     await api('admin/status');
     state.connected = true;
     state.proxy = true;
+    $('refresh').onclick = refresh;
     route();
   } catch (error) {
     // Direct localhost access still needs an admin key. A proxy deployment must
     // authenticate and protect ALL /gateway/admin/* routes before injecting it.
-    $('login').hidden = false;
-    $('connection-status').textContent = '请连接网关';
+    if (location.pathname.endsWith('/gateway/')) {
+      $('login').hidden = true;
+      $('connection-status').textContent = '连接失败';
+      notice('看板自动连接失败，请点击刷新重试；无需再次输入管理员凭据。');
+      $('refresh').disabled = false;
+      $('refresh').onclick = initialize;
+    } else {
+      $('login').hidden = false;
+      $('connection-status').textContent = '请连接网关';
+    }
   }
 }
