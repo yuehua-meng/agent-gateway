@@ -1,6 +1,6 @@
 // Cards, SVG trends and attempt timelines adapted from TextAgent observe.js.
 const $ = id => document.getElementById(id);
-const state = {key: '', page: 'overview', offset: 0, analytics: null, detail: null, selected: null, revision: 0, controller: null};
+const state = {key: '', connected: false, proxy: false, page: 'overview', offset: 0, analytics: null, detail: null, selected: null, revision: 0, controller: null};
 const names = {succeeded: '成功', failed: '失败', running: '运行中', unknown: '待核对'};
 const num = value => Number(value || 0).toLocaleString('zh-CN');
 const duration = value => value == null ? '—' : value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`;
@@ -22,7 +22,7 @@ function table(root, headers, rows) {
 function breakdown(root, rows) { const box = el('div', 'breakdown'); rows.forEach(([k, v]) => { const row = el('div', 'breakdown-row'); row.append(el('span', '', k), el('strong', '', v)); box.append(row); }); root.replaceChildren(box); }
 function kv(k, v) { const n = el('div', 'kv'); n.append(el('label', '', k), el('div', '', v == null || v === '' ? '—' : String(v))); return n; }
 async function api(path, signal, body) {
-  const r = await fetch(path, {signal, cache: 'no-store', method: body ? 'POST' : 'GET', headers: {Authorization: `Bearer ${state.key}`, ...(body ? {'Content-Type': 'application/json'} : {})}, ...(body ? {body: JSON.stringify(body)} : {})});
+  const r = await fetch(path, {signal, cache: 'no-store', method: body ? 'POST' : 'GET', headers: {...(state.key ? {Authorization: `Bearer ${state.key}`} : {}), ...(body ? {'Content-Type': 'application/json'} : {})}, ...(body ? {body: JSON.stringify(body)} : {})});
   const data = await r.json(); if (!r.ok) throw new Error(data.error?.message || `请求失败 (${r.status})`); return data;
 }
 function filters() { return new URLSearchParams({days: $('days').value, project: $('project').value, alias: $('alias').value}); }
@@ -44,7 +44,7 @@ function route() {
   refresh();
 }
 async function refresh() {
-  if (!state.key) return;
+  if (!state.connected) return;
   state.controller?.abort(); const controller = new AbortController(); state.controller = controller;
   const revision = ++state.revision, signal = controller.signal, page = state.page;
   $('connection-status').textContent = '更新中…';
@@ -53,8 +53,8 @@ async function refresh() {
     if (page === 'requests') { params.set('state', $('request-state').value); params.set('query', $('query').value.trim()); params.set('offset', state.offset); path = `admin/observe/requests?${params}`; }
     if (page === 'detail') path = `admin/observe/requests/${encodeURIComponent(state.detailId)}`;
     const [status, data] = await Promise.all([api('admin/status', signal), api(path, signal)]);
-    if (revision !== state.revision || !state.key) return;
-    $('login').hidden = true; $('dashboard').hidden = false; $('logout').hidden = false; $('refresh').disabled = false;
+    if (revision !== state.revision || !state.connected) return;
+    $('login').hidden = true; $('dashboard').hidden = false; $('logout').hidden = state.proxy; $('refresh').disabled = false;
     $('mode').textContent = status.mode === 'demo' ? '演示模式' : '真实调用'; $('demo-banner').hidden = status.mode !== 'demo';
     optionValues('project', [...Object.keys(status.projects), ...(data.groups?.project || []).map(x => x.name)]);
     optionValues('alias', Object.values(status.projects).flatMap(p => p.models));
@@ -121,11 +121,28 @@ function renderDetail(data) {
   const a=attempts.find(a=>a.id===state.selected), fields=el('div','span-fields');
   [['尝试 ID',a.id],['结果码',a.code],['候选',a.deployment],['发生时实际模型',a.actual_model || '历史记录未保存'],['开始时间',date(a.started)],['耗时',duration(a.elapsed_ms)],['输入 Token',a.prompt_tokens??'未知'],['输出 Token',a.completion_tokens??'未知'],['其中缓存输入（已包含）',a.cached_tokens??'未知 / 未返回'],['其中推理输出（已包含）',a.reasoning_tokens??'未知 / 未返回'],['费用',a.estimated_cost==null?'未知':`${a.currency} ${a.estimated_cost.toFixed(6)}`],['费用状态',({estimated:'价格表估算',unknown:'待核对',not_accepted:'明确未受理'})[a.cost_status] || a.cost_status]].forEach(([k,v])=>fields.append(kv(k,v))); $('span-detail').replaceChildren(el('h3','',a.deployment),fields);
 }
-$('login-form').onsubmit=event=>{event.preventDefault(); state.key=$('key').value.trim(); $('key').value=''; refresh();};
-$('logout').onclick=()=>{state.key='';state.revision++;state.controller?.abort();state.controller=null;state.analytics=null;state.detail=null;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('refresh').disabled=true;$('mode').textContent='未连接';$('connection-status').textContent='已断开';$('updated-at').textContent='等待数据';notice();};
+$('login-form').onsubmit=event=>{event.preventDefault(); state.key=$('key').value.trim(); state.connected=true; state.proxy=false; $('key').value=''; refresh();};
+$('logout').onclick=()=>{state.key='';state.connected=false;state.proxy=false;state.revision++;state.controller?.abort();state.controller=null;state.analytics=null;state.detail=null;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('refresh').disabled=true;$('mode').textContent='未连接';$('connection-status').textContent='已断开';$('updated-at').textContent='等待数据';notice();};
 document.querySelectorAll('[data-page]').forEach(n=>n.onclick=()=>navigate(n.dataset.page));
 ['days','project','alias','request-state'].forEach(id=>$(id).onchange=()=>{state.offset=0;refresh();});
 let searchTimer; $('query').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.offset=0;refresh();},300);};
 $('prev-page').onclick=()=>{state.offset=Math.max(0,state.offset-20);refresh();};$('next-page').onclick=()=>{state.offset+=20;refresh();};
 $('group-by').onchange=renderGroups;$('refresh').onclick=refresh;$('view-all').onclick=()=>navigate('requests');$('back-requests').onclick=()=>navigate('requests');
 window.addEventListener('hashchange',route);setInterval(()=>{if(!document.hidden && !state.controller) refresh();},15000);route();
+initialize();
+
+// On the deployed dashboard, Caddy authenticates the browser and injects the
+// upstream admin credential. Never expose that credential to browser JavaScript.
+async function initialize() {
+  try {
+    await api('admin/status');
+    state.connected = true;
+    state.proxy = true;
+    route();
+  } catch (error) {
+    // Direct localhost access still needs an admin key. A proxy deployment must
+    // authenticate and protect ALL /gateway/admin/* routes before injecting it.
+    $('login').hidden = false;
+    $('connection-status').textContent = '请连接网关';
+  }
+}
